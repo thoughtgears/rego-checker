@@ -1,0 +1,6 @@
+replicaCount: 1 # Fails: replica count should be > 1
+environment: "production"
+image:
+  repository: "nginx"
+  tag: "latest" # Fails: "latest" tag is discouraged
+# Fails: securityContext is missing
