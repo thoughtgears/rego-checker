@@ -1,15 +1,11 @@
 package main
 
 import (
-	"context"
 	"flag"
 	"fmt"
-	"log"
 	"os"
-	"path/filepath"
 
-	"github.com/goccy/go-yaml"
-	"github.com/open-policy-agent/opa/rego"
+	"github.com/thoughtgears/rego-checker/internal/policy"
 )
 
 const (
@@ -32,58 +28,40 @@ func main() {
 		os.Exit(1)
 	}
 
-	content, err := os.ReadFile(*fileName)
-	if err != nil {
-		log.Fatalf("Failed to read input file '%s': %s", *fileName, err)
+	checks := []struct {
+		name string
+		run  func() (*policy.Result, error)
+	}{
+		{
+			name: "Security",
+			run:  func() (*policy.Result, error) { return policy.Check(*fileName).Security().Images().Context().Run() },
+		},
+		{
+			name: "Replica",
+			run:  func() (*policy.Result, error) { return policy.Check(*fileName).Replica().Run() },
+		},
 	}
 
-	var input interface{}
-	if err := yaml.Unmarshal(content, &input); err != nil {
-		log.Fatalf("Failed to parse input: %s", err)
-	}
-
-	policies, err := os.ReadDir(PolicyDir)
-	if err != nil {
-		log.Fatalf("Failed to read policy directory: %s", err)
-	}
-
-	regoOpts := []func(*rego.Rego){
-		rego.Query("data.main.deny"),
-	}
-
-	for _, file := range policies {
-		if filepath.Ext(file.Name()) == ".rego" {
-			policyPath := filepath.Join(PolicyDir, file.Name())
-			content, err := os.ReadFile(policyPath)
-			if err != nil {
-				log.Fatalf("Failed to read policy file %s: %s", policyPath, err)
-			}
-			regoOpts = append(regoOpts, rego.Module(file.Name(), string(content)))
-		}
-	}
-
-	ctx := context.Background()
-	query, err := rego.New(regoOpts...).PrepareForEval(ctx)
-	if err != nil {
-		log.Fatalf("Failed to prepare query: %s", err)
-	}
-
-	results, err := query.Eval(ctx, rego.EvalInput(input))
-	if err != nil {
-		log.Fatalf("Failed to evaluate policy: %s", err)
-	}
-
-	if len(results) > 0 && len(results[0].Expressions) > 0 {
-		violations, ok := results[0].Expressions[0].Value.([]interface{})
-
-		if ok && len(violations) > 0 {
-			fmt.Println("❌ Policy violations found:")
-			for _, v := range violations {
-				fmt.Printf("- %v\n", v)
-			}
+	var allViolations []string
+	for _, check := range checks {
+		result, err := check.run()
+		if err != nil {
+			fmt.Printf("Error running %s checks: %s\n", check.name, err)
 			os.Exit(1)
 		}
+
+		if !result.Passed {
+			allViolations = append(allViolations, result.Violations...)
+		}
 	}
 
-	fmt.Println("✅ Policy check passed!")
+	if len(allViolations) > 0 {
+		fmt.Println("❌ Policy violations found:")
+		for _, v := range allViolations {
+			fmt.Printf("- %v\n", v)
+		}
+		os.Exit(1)
+	}
+
+	fmt.Println("✅ All policy checks passed!")
 }

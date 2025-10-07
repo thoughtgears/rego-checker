@@ -1,6 +1,6 @@
 package main
 
-deny[msg] {
+deny contains msg if {
     not input.securityContext
     msg := "A securityContext must be defined for the deployment."
 }
